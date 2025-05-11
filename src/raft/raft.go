@@ -98,7 +98,7 @@ func (rf *Raft) becomeFollowerLocked(term int) {
 		return
 	}
 
-	LOG(rf.me, rf.currentTerm, DLog, "%s->Follower, For T%s->T%s", rf.role, rf.currentTerm, term)
+	LOG(rf.me, rf.currentTerm, DLog, "%d->Follower, For T%d->T%d", rf.role, rf.currentTerm, term)
 	rf.role = Follower
 	if term > rf.currentTerm {
 		rf.votedFor = -1
@@ -116,6 +116,8 @@ func (rf *Raft) becomeCandidateLocked() {
 	rf.currentTerm++
 	rf.role = Candidate
 	rf.votedFor = rf.me
+
+	rf.resetElectionTimerLocked()
 }
 
 func (rf *Raft) becomeLeaderLocked() {
@@ -131,10 +133,10 @@ func (rf *Raft) becomeLeaderLocked() {
 // believes it is the leader.
 func (rf *Raft) GetState() (int, bool) {
 
-	var term int
-	var isleader bool
 	// Your code here (PartA).
-	return term, isleader
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+	return rf.currentTerm, rf.role == Leader
 }
 
 // save Raft's persistent state to stable storage,
@@ -437,7 +439,7 @@ func (rf *Raft) startElection(term int) {
 	}
 
 	for peer := 0; peer < len(rf.peers); peer++ {
-		if peer != rf.me {
+		if peer == rf.me {
 			votes++
 			continue
 		}

@@ -1,4 +1,5 @@
-#!/usr/bin/env python3
+
+# coding=utf-8
 import sys
 import shutil
 from typing import Optional, List, Tuple, Dict
@@ -16,10 +17,7 @@ TOPICS = {
     "INFO": "#ffffff",
     "WARN": "#d08341",
     "ERRO": "#fe2626",
-
     "TIMR": "#9a9a99",
-    "VOTE": "#67a0b2",
-    "LEAD": "#d0b343",
     "TERM": "#70c43f",
     "LOG1": "#4878bc",
     "LOG2": "#398280",
