@@ -15,12 +15,27 @@ func (rf *Raft) isElectionTimeoutLocked() bool {
 	return time.Since(rf.electionStart) > rf.electionTimeout
 }
 
+// 检查自己的最后一条日志是否比候选者的更新
+func (rf *Raft) isMoreUpToDateLocked(candidateIndex int, candidateTerm int) bool {
+	l := len(rf.log)
+	lastIndex, lastTerm := l-1, rf.log[l-1].Term
+
+	LOG(rf.me, rf.currentTerm, DVote, "compare last log, me: [%d]T%d, candidate: [%d]T%d", lastIndex, lastTerm, candidateIndex, candidateTerm)
+	if lastTerm != candidateTerm {
+		return lastTerm > candidateTerm
+	}
+	return lastIndex > candidateIndex
+}
+
 // example RequestVote RPC arguments structure.
 // field names must start with capital letters!
 type RequestVoteArgs struct {
 	// Your data here (PartA, PartB).
 	Term        int
 	CandidateId int
+
+	LastLogIndex int
+	LastLogTerm  int
 }
 
 // example RequestVote RPC reply structure.
@@ -42,7 +57,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	reply.VoteGranted = false
 	// 对齐term
 	if args.Term < rf.currentTerm {
-		LOG(rf.me, rf.currentTerm, DVote, "-> S%d, Reject voted, higher term, T%d->T%d", args.CandidateId, rf.currentTerm, args.Term)
+		LOG(rf.me, rf.currentTerm, DVote, "-> S%d, reject voted, higher term, T%d->T%d", args.CandidateId, rf.currentTerm, args.Term)
 		return
 	}
 	if args.Term > rf.currentTerm {
@@ -51,7 +66,13 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 
 	// 检查是否投过票
 	if rf.votedFor != -1 {
-		LOG(rf.me, rf.currentTerm, DVote, "-> S%d, Reject, Already voted to S%d", args.CandidateId, rf.votedFor)
+		LOG(rf.me, rf.currentTerm, DVote, "-> S%d, reject voted, already voted to S%d", args.CandidateId, rf.votedFor)
+		return
+	}
+
+	// 检查候选者的日志是否更新
+	if rf.isMoreUpToDateLocked(args.LastLogIndex, args.LastLogIndex) {
+		LOG(rf.me, rf.currentTerm, DVote, "-> S%d, reject voted, candidate less uptodate", args.CandidateId)
 		return
 	}
 
@@ -138,6 +159,7 @@ func (rf *Raft) startElection(term int) {
 		return
 	}
 
+	l := len(rf.log)
 	for peer := 0; peer < len(rf.peers); peer++ {
 		if peer == rf.me {
 			votes++
@@ -145,8 +167,10 @@ func (rf *Raft) startElection(term int) {
 		}
 
 		args := &RequestVoteArgs{
-			Term:        rf.currentTerm,
-			CandidateId: rf.me,
+			Term:         rf.currentTerm,
+			CandidateId:  rf.me,
+			LastLogIndex: l - 1,
+			LastLogTerm:  rf.log[l-1].Term,
 		}
 
 		// 异步线程
