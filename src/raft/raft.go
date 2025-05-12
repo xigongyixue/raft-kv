@@ -77,6 +77,12 @@ type Raft struct {
 	currentTerm int
 	votedFor    int // -1 意味着没有投票
 
+	log []LogEntry // 本地日志
+
+	// leader使用
+	nextIndex  []int
+	matchIndex []int
+
 	electionStart   time.Time
 	electionTimeout time.Duration // 随机
 }
@@ -116,6 +122,11 @@ func (rf *Raft) becomeLeaderLocked() {
 
 	LOG(rf.me, rf.currentTerm, DLeader, "Become Leader in T%d", rf.currentTerm)
 	rf.role = Leader
+
+	for peer := 0; peer < len(rf.peers); peer++ {
+		rf.nextIndex[peer] = len(rf.log)
+		rf.matchIndex[peer] = 0
+	}
 }
 
 // return currentTerm and whether this server
@@ -252,6 +263,11 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.role = Follower
 	rf.currentTerm = 0
 	rf.votedFor = -1
+
+	// 初始化leader视图
+	rf.log = append(rf.log, LogEntry{})
+	rf.nextIndex = make([]int, len(rf.peers))
+	rf.matchIndex = make([]int, len(rf.peers))
 
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
