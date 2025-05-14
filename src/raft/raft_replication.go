@@ -1,5 +1,9 @@
 package raft
 
+import (
+	"sort"
+)
+
 type LogEntry struct {
 	Term         int
 	CommandValid bool // 设置是否实施
@@ -15,6 +19,8 @@ type AppendEntriesArgs struct {
 	PrevLogTerm  int
 
 	Entries []LogEntry
+
+	LeaderCommit int // 更新follower's commit index
 }
 
 type AppendEntriesReply struct {
@@ -54,12 +60,30 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	reply.Success = true
 	LOG(rf.me, rf.currentTerm, DLeader, "follower accept logs: (%d %d)", args.PrevLogIndex, args.PrevLogIndex+len(args.Entries))
 
+	// 处理leader commit
+	if args.LeaderCommit > rf.commitIndex {
+		LOG(rf.me, rf.currentTerm, DApply, "update the commit index %d->%d", rf.commitIndex, args.LeaderCommit)
+		rf.commitIndex = args.LeaderCommit
+		rf.applyCond.Signal()
+	}
+
 	rf.resetElectionTimerLocked()
 }
 
 func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *AppendEntriesReply) bool {
 	ok := rf.peers[server].Call("Raft.AppendEntries", args, reply)
 	return ok
+}
+
+// 返回一半peer已匹配上的日志索引
+func (rf *Raft) getMajorityIndexLocked() int {
+	tmpIndexes := make([]int, len(rf.peers))
+	copy(tmpIndexes, rf.matchIndex)
+	sort.Ints(sort.IntSlice(tmpIndexes))
+	majorityIdx := (len(rf.peers) - 1) / 2
+	LOG(rf.me, rf.currentTerm, DDebug, "match index after sort: %v, majority[%d]=%d", tmpIndexes, majorityIdx, tmpIndexes[majorityIdx])
+	return tmpIndexes[majorityIdx]
+
 }
 
 func (rf *Raft) startReplication(term int) bool {
@@ -95,8 +119,19 @@ func (rf *Raft) startReplication(term int) bool {
 		}
 
 		// 成功
+
+		// 更新匹配和next索引
+
 		rf.matchIndex[peer] = args.PrevLogIndex + len(args.Entries) // 不能使用自己的变量，因为可能会更新 ！！！
 		rf.nextIndex[peer] = rf.matchIndex[peer] + 1
+
+		// 更新提交索引
+		majorityMathced := rf.getMajorityIndexLocked()
+		if majorityMathced > rf.commitIndex {
+			LOG(rf.me, rf.currentTerm, DApply, "update the commit index %d->%d", rf.commitIndex, majorityMathced)
+			rf.commitIndex = majorityMathced
+			rf.applyCond.Signal()
+		}
 
 	}
 
@@ -123,6 +158,7 @@ func (rf *Raft) startReplication(term int) bool {
 			PrevLogIndex: prevIdx,
 			PrevLogTerm:  prevTerm,
 			Entries:      rf.log[prevIdx+1:],
+			LeaderCommit: rf.commitIndex,
 		}
 
 		go replicateToPeer(peer, args)

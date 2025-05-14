@@ -85,6 +85,12 @@ type Raft struct {
 
 	electionStart   time.Time
 	electionTimeout time.Duration // 随机
+
+	// 日志应用
+	commitIndex int
+	lastApplied int
+	applyCh     chan ApplyMsg
+	applyCond   *sync.Cond
 }
 
 func (rf *Raft) becomeFollowerLocked(term int) {
@@ -269,11 +275,15 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.nextIndex = make([]int, len(rf.peers))
 	rf.matchIndex = make([]int, len(rf.peers))
 
+	// 初始化日志应用字段
+	rf.applyCh = applyCh
+	rf.applyCond = sync.NewCond(&rf.mu)
+
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
 
 	// start ticker goroutine to start elections
 	go rf.electionTicker()
-
+	go rf.applicationTicker()
 	return rf
 }
