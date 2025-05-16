@@ -71,7 +71,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	}
 
 	// 检查候选者的日志是否更新
-	if rf.isMoreUpToDateLocked(args.LastLogIndex, args.LastLogIndex) {
+	if rf.isMoreUpToDateLocked(args.LastLogIndex, args.LastLogTerm) {
 		LOG(rf.me, rf.currentTerm, DVote, "-> S%d, reject voted, candidate less uptodate", args.CandidateId)
 		return
 	}

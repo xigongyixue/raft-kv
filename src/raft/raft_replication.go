@@ -39,12 +39,14 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	if args.Term < rf.currentTerm {
 		LOG(rf.me, rf.currentTerm, DLog2, "<- S%d, Reject log, Higher term, T%d<T%d", args.LeaderId, args.Term, rf.currentTerm)
 		return
-	} else {
+	}
+
+	if args.Term >= rf.currentTerm {
 		rf.becomeFollowerLocked(args.Term)
 	}
 
 	// 如果prevlog未匹配上
-	if args.PrevLogIndex > len(rf.log) {
+	if args.PrevLogIndex >= len(rf.log) {
 		LOG(rf.me, rf.currentTerm, DLog2, "<- S%d, Reject log, Follower log too short, len:%d <=prev:%d", args.LeaderId, len(rf.log), args.PrevLogIndex)
 		return
 	}
@@ -95,12 +97,17 @@ func (rf *Raft) startReplication(term int) bool {
 		rf.mu.Lock()
 		defer rf.mu.Unlock()
 		if !ok {
-			LOG(rf.me, rf.currentTerm, DLog, "-> S%d", "Lost or crashed", peer)
+			LOG(rf.me, rf.currentTerm, DLog, "-> S%d Lost or crashed", peer)
 			return
 		}
 
 		if reply.Term > rf.currentTerm {
 			rf.becomeFollowerLocked(reply.Term)
+			return
+		}
+
+		if rf.contextLostLocked(Leader, term) {
+			LOG(rf.me, rf.currentTerm, DLog, "-> S%d, context lost, T%d:Leader->T%d:%d", peer, term, rf.currentTerm, rf.role)
 			return
 		}
 
@@ -114,7 +121,7 @@ func (rf *Raft) startReplication(term int) bool {
 				idx--
 			}
 			rf.nextIndex[peer] = idx + 1
-			LOG(rf.me, rf.currentTerm, DLog, "not matched with S%d int %d, try next=%d", peer, args.PrevLogIndex, rf.nextIndex[peer])
+			LOG(rf.me, rf.currentTerm, DLog, "-> S%d, not matched at %d, try next=%d", peer, args.PrevLogIndex, rf.nextIndex[peer])
 			return
 		}
 

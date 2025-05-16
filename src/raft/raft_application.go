@@ -6,7 +6,7 @@ func (rf *Raft) applicationTicker() {
 		rf.applyCond.Wait() // 先释放锁，signal之后获得锁
 
 		entries := make([]LogEntry, 0)
-		for i := rf.lastApplied; i <= rf.commitIndex; i++ {
+		for i := rf.lastApplied + 1; i <= rf.commitIndex; i++ {
 			entries = append(entries, rf.log[i])
 		}
 		rf.mu.Unlock()
@@ -20,7 +20,7 @@ func (rf *Raft) applicationTicker() {
 		}
 
 		rf.mu.Lock()
-		LOG(rf.me, rf.currentTerm, DApply, "Apply log for [%d, %d]", rf.lastApplied, rf.lastApplied+len(entries))
+		LOG(rf.me, rf.currentTerm, DApply, "Apply log for [%d, %d]", rf.lastApplied+1, rf.lastApplied+len(entries))
 		rf.lastApplied += len(entries)
 		rf.mu.Unlock()
 	}

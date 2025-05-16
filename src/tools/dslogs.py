@@ -29,6 +29,7 @@ TOPICS = {
     "TEST": "#fe2c79",
     "TRCE": "#fe2626",
     "APLY": "#696773",
+    "LEAD": "#13D11C"
 }
 # fmt: on
 
