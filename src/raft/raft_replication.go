@@ -26,6 +26,9 @@ type AppendEntriesArgs struct {
 type AppendEntriesReply struct {
 	Term    int
 	Success bool
+
+	ConfilictIndex int
+	ConfilictTerm  int
 }
 
 // peer's callback
@@ -45,20 +48,27 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		rf.becomeFollowerLocked(args.Term)
 	}
 
+	defer rf.resetElectionTimerLocked()
+
 	// 如果prevlog未匹配上
 	if args.PrevLogIndex >= len(rf.log) {
+		reply.ConfilictIndex = len(rf.log)
+		reply.ConfilictTerm = InvalidTerm
 		LOG(rf.me, rf.currentTerm, DLog2, "<- S%d, Reject log, Follower log too short, len:%d <=prev:%d", args.LeaderId, len(rf.log), args.PrevLogIndex)
 		return
 	}
 
 	// 说明从这里（或前面）开始日志丢失
 	if rf.log[args.PrevLogIndex].Term != args.PrevLogTerm {
+		reply.ConfilictTerm = rf.log[args.PrevLogIndex].Term
+		reply.ConfilictIndex = rf.firstLogFor(reply.ConfilictTerm)
 		LOG(rf.me, rf.currentTerm, DLog2, "<- S%d, reject log, pre log not match, {%d}: T%d != T%d", args.LeaderId, args.PrevLogIndex, rf.log[args.PrevLogIndex].Term, args.PrevLogTerm)
 		return
 	}
 
 	// 添加leader's log entries 到本地
 	rf.log = append(rf.log[:args.PrevLogIndex+1], args.Entries...)
+	rf.persistLocked()
 	reply.Success = true
 	LOG(rf.me, rf.currentTerm, DLeader, "follower accept logs: (%d %d)", args.PrevLogIndex, args.PrevLogIndex+len(args.Entries))
 
@@ -68,8 +78,6 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		rf.commitIndex = args.LeaderCommit
 		rf.applyCond.Signal()
 	}
-
-	rf.resetElectionTimerLocked()
 }
 
 func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *AppendEntriesReply) bool {
@@ -113,14 +121,27 @@ func (rf *Raft) startReplication(term int) bool {
 
 		// 处理回复
 
-		// 失败
+		// 失败 回退
 		if !reply.Success {
-			// 回退一个term
-			idx, term := args.PrevLogIndex, args.PrevLogTerm
-			for idx > 0 && rf.log[idx].Term == term {
-				idx--
+			prevIndex := rf.nextIndex[peer]
+
+			if reply.ConfilictTerm == InvalidTerm { // 说明follower日志过短
+				rf.nextIndex[peer] = reply.ConfilictIndex
+			} else {
+				firstIndex := rf.firstLogFor(reply.ConfilictTerm)
+
+				if firstIndex != InvalidIndex { // leader有该term
+					rf.nextIndex[peer] = firstIndex
+				} else {
+					rf.nextIndex[peer] = reply.ConfilictIndex
+				}
 			}
-			rf.nextIndex[peer] = idx + 1
+
+			// 避免乱序
+			if rf.nextIndex[peer] > prevIndex {
+				rf.nextIndex[peer] = prevIndex
+			}
+
 			LOG(rf.me, rf.currentTerm, DLog, "-> S%d, not matched at %d, try next=%d", peer, args.PrevLogIndex, rf.nextIndex[peer])
 			return
 		}
