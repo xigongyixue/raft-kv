@@ -1,6 +1,2 @@
-pkg/
-api.key
-.api.key.trimmed
-*-handin.tar.gz
 *.txt
 *.log

@@ -18,8 +18,7 @@ func (rf *Raft) isElectionTimeoutLocked() bool {
 
 // 检查自己的最后一条日志是否比候选者的更新
 func (rf *Raft) isMoreUpToDateLocked(candidateIndex int, candidateTerm int) bool {
-	l := len(rf.log)
-	lastIndex, lastTerm := l-1, rf.log[l-1].Term
+	lastIndex, lastTerm := rf.log.last()
 
 	LOG(rf.me, rf.currentTerm, DVote, "compare last log, me: [%d]T%d, candidate: [%d]T%d", lastIndex, lastTerm, candidateIndex, candidateTerm)
 	if lastTerm != candidateTerm {
@@ -171,7 +170,7 @@ func (rf *Raft) startElection(term int) {
 		return
 	}
 
-	l := len(rf.log)
+	lastIdx, lastTerm := rf.log.last()
 	for peer := 0; peer < len(rf.peers); peer++ {
 		if peer == rf.me {
 			votes++
@@ -181,8 +180,8 @@ func (rf *Raft) startElection(term int) {
 		args := &RequestVoteArgs{
 			Term:         rf.currentTerm,
 			CandidateId:  rf.me,
-			LastLogIndex: l - 1,
-			LastLogTerm:  rf.log[l-1].Term,
+			LastLogIndex: lastIdx,
+			LastLogTerm:  lastTerm,
 		}
 		LOG(rf.me, rf.currentTerm, DDebug, "-> S%d, ask vote, %v", peer, args.String())
 

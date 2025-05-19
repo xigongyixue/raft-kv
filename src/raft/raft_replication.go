@@ -61,28 +61,28 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		rf.resetElectionTimerLocked()
 		if !reply.Success {
 			LOG(rf.me, rf.currentTerm, DLog2, "<- S%d, follower confict: [%d]T%d", args.LeaderId, reply.ConfilictIndex, reply.ConfilictTerm)
-			LOG(rf.me, rf.currentTerm, DDebug, "<- S%d, follower log=%v", args.LeaderId, rf.logString())
+			LOG(rf.me, rf.currentTerm, DDebug, "<- S%d, follower log=%v", args.LeaderId, rf.log.String())
 		}
 	}()
 
 	// 如果prevlog未匹配上
-	if args.PrevLogIndex >= len(rf.log) {
-		reply.ConfilictIndex = len(rf.log)
+	if args.PrevLogIndex >= rf.log.size() {
+		reply.ConfilictIndex = rf.log.size()
 		reply.ConfilictTerm = InvalidTerm
-		LOG(rf.me, rf.currentTerm, DLog2, "<- S%d, Reject log, Follower log too short, len:%d <=prev:%d", args.LeaderId, len(rf.log), args.PrevLogIndex)
+		LOG(rf.me, rf.currentTerm, DLog2, "<- S%d, Reject log, Follower log too short, len:%d <=prev:%d", args.LeaderId, rf.log.size(), args.PrevLogIndex)
 		return
 	}
 
 	// 说明从这里（或前面）开始日志丢失
-	if rf.log[args.PrevLogIndex].Term != args.PrevLogTerm {
-		reply.ConfilictTerm = rf.log[args.PrevLogIndex].Term
-		reply.ConfilictIndex = rf.firstLogFor(reply.ConfilictTerm)
-		LOG(rf.me, rf.currentTerm, DLog2, "<- S%d, reject log, pre log not match, {%d}: T%d != T%d", args.LeaderId, args.PrevLogIndex, rf.log[args.PrevLogIndex].Term, args.PrevLogTerm)
+	if rf.log.at(args.PrevLogIndex).Term != args.PrevLogTerm {
+		reply.ConfilictTerm = rf.log.at(args.PrevLogIndex).Term
+		reply.ConfilictIndex = rf.log.firstFor(reply.ConfilictTerm)
+		LOG(rf.me, rf.currentTerm, DLog2, "<- S%d, reject log, pre log not match, {%d}: T%d != T%d", args.LeaderId, args.PrevLogIndex, rf.log.at(args.PrevLogIndex).Term, args.PrevLogTerm)
 		return
 	}
 
 	// 添加leader's log entries 到本地
-	rf.log = append(rf.log[:args.PrevLogIndex+1], args.Entries...)
+	rf.log.appendFrom(args.PrevLogIndex, args.Entries)
 	rf.persistLocked()
 	reply.Success = true
 	LOG(rf.me, rf.currentTerm, DLeader, "follower accept logs: (%d %d)", args.PrevLogIndex, args.PrevLogIndex+len(args.Entries))
@@ -144,7 +144,7 @@ func (rf *Raft) startReplication(term int) bool {
 			if reply.ConfilictTerm == InvalidTerm { // 说明follower日志过短
 				rf.nextIndex[peer] = reply.ConfilictIndex
 			} else {
-				firstIndex := rf.firstLogFor(reply.ConfilictTerm)
+				firstIndex := rf.log.firstFor(reply.ConfilictTerm)
 
 				if firstIndex != InvalidIndex { // leader有该term
 					rf.nextIndex[peer] = firstIndex
@@ -159,8 +159,8 @@ func (rf *Raft) startReplication(term int) bool {
 			}
 
 			LOG(rf.me, rf.currentTerm, DLog, "-> S%d, not matched at prev [%d]T%d, try next prev=[%d]T[%d]",
-				peer, args.PrevLogIndex, args.PrevLogTerm, rf.nextIndex[peer]-1, rf.log[rf.nextIndex[peer]-1])
-			LOG(rf.me, rf.currentTerm, DDebug, "-> S%d, leader log=%v", peer, rf.logString())
+				peer, args.PrevLogIndex, args.PrevLogTerm, rf.nextIndex[peer]-1, rf.log.at(rf.nextIndex[peer]-1))
+			LOG(rf.me, rf.currentTerm, DDebug, "-> S%d, leader log=%v", peer, rf.log.String())
 			return
 		}
 
@@ -173,7 +173,7 @@ func (rf *Raft) startReplication(term int) bool {
 
 		// 更新提交索引
 		majorityMathced := rf.getMajorityIndexLocked()
-		if majorityMathced > rf.commitIndex && rf.log[majorityMathced].Term == rf.currentTerm { // figure8: 不能提交已提交的日志
+		if majorityMathced > rf.commitIndex && rf.log.at(majorityMathced).Term == rf.currentTerm { // figure8: 不能提交已提交的日志
 			LOG(rf.me, rf.currentTerm, DApply, "update the commit index %d->%d", rf.commitIndex, majorityMathced)
 			rf.commitIndex = majorityMathced
 			rf.applyCond.Signal()
@@ -191,19 +191,19 @@ func (rf *Raft) startReplication(term int) bool {
 
 	for peer := 0; peer < len(rf.peers); peer++ {
 		if peer == rf.me {
-			rf.matchIndex[peer] = len(rf.log) - 1
-			rf.nextIndex[peer] = len(rf.log)
+			rf.matchIndex[peer] = rf.log.size() - 1
+			rf.nextIndex[peer] = rf.log.size()
 			continue
 		}
 
 		prevIdx := rf.nextIndex[peer] - 1 // 未匹配日志标志位置，不包括本身
-		prevTerm := rf.log[prevIdx].Term
+		prevTerm := rf.log.at(prevIdx).Term
 		args := &AppendEntriesArgs{
 			Term:         rf.currentTerm,
 			LeaderId:     rf.me,
 			PrevLogIndex: prevIdx,
 			PrevLogTerm:  prevTerm,
-			Entries:      rf.log[prevIdx+1:],
+			Entries:      rf.log.tail(prevIdx + 1),
 			LeaderCommit: rf.commitIndex,
 		}
 		LOG(rf.me, rf.currentTerm, DDebug, "-> S%d, append, args=%v", peer, args.String())
