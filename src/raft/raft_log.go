@@ -122,6 +122,7 @@ func (rl *RaftLog) String() string {
 	return terms
 }
 
+// 应用层做检查点
 func (rl *RaftLog) doSnapshot(index int, snapshot []byte) {
 	idx := rl.idx(index)
 
@@ -129,10 +130,26 @@ func (rl *RaftLog) doSnapshot(index int, snapshot []byte) {
 	rl.snapLastTerm = rl.tailLog[idx].Term
 	rl.snapshot = snapshot
 
+	// 保留后面日志
 	newLog := make([]LogEntry, 0, rl.size()-rl.snapLastIdx)
 	newLog = append(newLog, LogEntry{
 		Term: rl.snapLastTerm,
 	})
 	newLog = append(newLog, rl.tailLog[idx+1:]...)
+	rl.tailLog = newLog
+}
+
+// 从leader下载快照
+func (rl *RaftLog) installSnapshot(index, term int, snapshot []byte) {
+
+	rl.snapLastIdx = index
+	rl.snapLastTerm = term
+	rl.snapshot = snapshot
+
+	// 直接覆盖
+	newLog := make([]LogEntry, 0, 1)
+	newLog = append(newLog, LogEntry{
+		Term: rl.snapLastTerm,
+	})
 	rl.tailLog = newLog
 }
