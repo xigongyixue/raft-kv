@@ -35,6 +35,7 @@ func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 	// 不是leader
 	if !isLeader {
 		reply.Err = ErrWrongLeader
+		return
 	}
 
 	// 等待结果
@@ -58,6 +59,7 @@ func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 	}()
 }
 
+// 判断是否为重复请求
 func (kv *KVServer) requestDuplicated(clientId, seqId int64) bool {
 	info, ok := kv.duplicateTable[clientId]
 	return ok && seqId <= info.SeqId
@@ -66,12 +68,30 @@ func (kv *KVServer) requestDuplicated(clientId, seqId int64) bool {
 func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 	// Your code here.
 
+	// 判断请求是否重复
+	kv.mu.Lock()
+	if kv.requestDuplicated(args.ClientId, args.SeqId) {
+		// 如果重复，直接返回结果
+		opReply := kv.duplicateTable[args.ClientId].Reply
+		reply.Err = opReply.Err
+		kv.mu.Unlock()
+		return
+	}
+	kv.mu.Unlock()
+
 	// 调用raft,将请求存储到raft日志中并进行同步
-	index, _, isLeader := kv.rf.Start(Op{Key: args.Key, Value: args.Value, OpType: OpAppend})
+	index, _, isLeader := kv.rf.Start(Op{
+		Key:      args.Key,
+		Value:    args.Value,
+		OpType:   getOperationType(args.Op),
+		ClientId: args.ClientId,
+		SeqId:    args.SeqId,
+	})
 
 	// 不是leader
 	if !isLeader {
 		reply.Err = ErrWrongLeader
+		return
 	}
 
 	kv.mu.Lock()
@@ -167,8 +187,19 @@ func (kv *KVServer) applyTask() {
 
 				// 取出用户操作
 				op := message.Command.(Op)
-				// 应用到状态机
-				opReply := kv.applyToStateMachine(op)
+				var opReply *OpReply
+				if op.OpType != OpGet && kv.requestDuplicated(op.ClientId, op.SeqId) {
+					opReply = kv.duplicateTable[op.ClientId].Reply
+				} else {
+					// 应用到状态机
+					opReply = kv.applyToStateMachine(op)
+					if op.OpType != OpGet {
+						kv.duplicateTable[op.ClientId] = LastOperationInfo{
+							SeqId: op.SeqId,
+							Reply: opReply,
+						}
+					}
+				}
 
 				// 发送结果
 				if _, isLeader := kv.rf.GetState(); isLeader {
@@ -176,6 +207,16 @@ func (kv *KVServer) applyTask() {
 					notifyCh <- opReply
 				}
 
+				// 判断是否需要快照
+				if kv.maxraftstate != -1 && kv.rf.GetRaftStateSize() >= kv.maxraftstate {
+					kv.makeSnapshot(message.CommandIndex)
+				}
+
+				kv.mu.Unlock()
+			} else if message.SnapshotValid {
+				kv.mu.Lock()
+				kv.restoreFromSnapshot(message.Snapshot)
+				kv.lastApplied = message.SnapshotIndex
 				kv.mu.Unlock()
 			}
 		}
