@@ -1,8 +1,10 @@
 package kvraft
 
-import "course/labrpc"
-import "crypto/rand"
-import "math/big"
+import (
+	"course/labrpc"
+	"crypto/rand"
+	"math/big"
+)
 
 type Clerk struct {
 	servers []*labrpc.ClientEnd
@@ -46,15 +48,15 @@ func (ck *Clerk) Get(key string) string {
 		Key: key,
 	}
 
+	var reply GetReply
 	for {
-		var reply GetReply
 		ok := ck.servers[ck.leaderId].Call("KVServer.Get", &args, &reply)
 		if !ok || reply.Err == ErrWrongLeader || reply.Err == ErrTimeout {
-			// 请求失败，选择另一个节点重试
+			// 请求失败，换一个节点
 			ck.leaderId = (ck.leaderId + 1) % len(ck.servers)
 			continue
 		}
-		// 调用成功，返回 value
+
 		return reply.Value
 	}
 }
@@ -70,23 +72,19 @@ func (ck *Clerk) Get(key string) string {
 func (ck *Clerk) PutAppend(key string, value string, op string) {
 	// You will have to modify this function.
 	args := PutAppendArgs{
-		Key:      key,
-		Value:    value,
-		Op:       op,
-		ClientId: ck.clientId,
-		SeqId:    ck.seqId,
+		Key:   key,
+		Value: value,
+		Op:    op,
 	}
 
+	var reply PutAppendReply
 	for {
-		var reply PutAppendReply
 		ok := ck.servers[ck.leaderId].Call("KVServer.PutAppend", &args, &reply)
 		if !ok || reply.Err == ErrWrongLeader || reply.Err == ErrTimeout {
-			// 请求失败，选择另一个节点重试
+			// 请求失败，换一个节点
 			ck.leaderId = (ck.leaderId + 1) % len(ck.servers)
 			continue
 		}
-		// 调用成功，返回
-		ck.seqId++
 		return
 	}
 }
