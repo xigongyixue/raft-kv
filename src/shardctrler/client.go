@@ -4,9 +4,11 @@ package shardctrler
 // Shardctrler clerk.
 //
 
-import "course/labrpc"
-import "crypto/rand"
-import "math/big"
+import (
+	"course/labrpc"
+	"crypto/rand"
+	"math/big"
+)
 
 type Clerk struct {
 	servers []*labrpc.ClientEnd
@@ -38,11 +40,10 @@ func (ck *Clerk) Query(num int) Config {
 	// Your code here.
 	args.Num = num
 	for {
-		// try each known server.
 		var reply QueryReply
 		ok := ck.servers[ck.leaderId].Call("ShardCtrler.Query", args, &reply)
-		if !ok || reply.Err == ErrWrongLeader || reply.Err == ErrTimeout {
-			ck.leaderId = (ck.leaderId + 1) % len(ck.servers)
+		if !ok && reply.Err == ErrWrongLeader || reply.Err == ErrTimeout {
+			ck.clientId = int64((ck.leaderId + 1) % len(ck.servers))
 			continue
 		}
 		return reply.Config
@@ -57,31 +58,31 @@ func (ck *Clerk) Join(servers map[int][]string) {
 	for {
 		var reply JoinReply
 		ok := ck.servers[ck.leaderId].Call("ShardCtrler.Join", args, &reply)
-		if !ok || reply.Err == ErrWrongLeader || reply.Err == ErrTimeout {
-			ck.leaderId = (ck.leaderId + 1) % len(ck.servers)
+		if !ok && reply.Err == ErrWrongLeader || reply.Err == ErrTimeout {
+			ck.clientId = int64((ck.leaderId + 1) % len(ck.servers))
 			continue
 		}
 		ck.seqId++
 		return
 	}
+
 }
 
 func (ck *Clerk) Leave(gids []int) {
 	args := &LeaveArgs{ClientId: ck.clientId, SeqId: ck.seqId}
 	// Your code here.
 	args.GIDs = gids
-
 	for {
-		// try each known server.
 		var reply LeaveReply
 		ok := ck.servers[ck.leaderId].Call("ShardCtrler.Leave", args, &reply)
-		if !ok || reply.Err == ErrWrongLeader || reply.Err == ErrTimeout {
-			ck.leaderId = (ck.leaderId + 1) % len(ck.servers)
+		if !ok && reply.Err == ErrWrongLeader || reply.Err == ErrTimeout {
+			ck.clientId = int64((ck.leaderId + 1) % len(ck.servers))
 			continue
 		}
 		ck.seqId++
 		return
 	}
+
 }
 
 func (ck *Clerk) Move(shard int, gid int) {
@@ -91,11 +92,10 @@ func (ck *Clerk) Move(shard int, gid int) {
 	args.GID = gid
 
 	for {
-		// try each known server.
 		var reply MoveReply
 		ok := ck.servers[ck.leaderId].Call("ShardCtrler.Move", args, &reply)
-		if !ok || reply.Err == ErrWrongLeader || reply.Err == ErrTimeout {
-			ck.leaderId = (ck.leaderId + 1) % len(ck.servers)
+		if !ok && reply.Err == ErrWrongLeader || reply.Err == ErrTimeout {
+			ck.clientId = int64((ck.leaderId + 1) % len(ck.servers))
 			continue
 		}
 		ck.seqId++
